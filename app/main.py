@@ -5,9 +5,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from app.otel import request_counter
 
 
 DB_PATH = Path(os.getenv("ORDER_DB_PATH", "data/orders.db"))
@@ -77,6 +80,20 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Order Tracker", lifespan=lifespan)
+
+# OpenTelemetry instrumentation
+FastAPIInstrumentor().instrument_app(app)
+
+# Middleware to collect request metrics
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    response = await call_next(request)
+    # Extract route and status code
+    route = request.url.path
+    status_code = response.status_code
+    # Increment the counter with attributes
+    request_counter.add(1, {"route": route, "status_code": str(status_code)})
+    return response
 
 
 @app.get("/")
